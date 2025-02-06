@@ -1,0 +1,411 @@
+#!/bin/bash
+
+usage () 
+{
+    cat >&2 <<EOF
+Usage: $(basename $0) [options] <file1> <file2> 
+ccdiff - Colored Char DIFF: Highlight file differences char by char
+
+Options:
+  -h, --help            this help
+
+      --prefixes=PFIXS  The prefixes to use; PFIXS is a colon-separated
+                        list of strings, by default '-:+: '
+
+  Highlight mode:
+   -c, --line           Differences are highlighted line by line;
+                        equivalent to --threshold 100
+   -l, --char           Differences are highlighted char by char
+                        equivalent to --threshold 0
+       --colordiff=MODE MODE can be one of:
+                        - "auto": difference highlights are by line 
+                          or by char depending on how similar the
+                          the lines are, based on colordiff threshold 
+                        - "char": equivalent to --char
+                        - "line": equivalent to --line
+      --threshold=PCT   Percentage of similarity between lines,
+                        defining if differences are shown char by
+                        char or not. Default is 50
+
+  Colored display:
+      --html            HTML output; defines --palette 'to be defined'
+                        and terminates each line with <BR/>
+      --palette=PALETTE The colors to use when --color is active; PALETTE is
+                        a colon-separated list of terminfo capabilities;
+                        default is <red>:<green>:<reset> capabilities;
+                        ignored if --html is set
+
+EOF
+
+}
+
+RED="$(tput setaf 1)" GREEN="$(tput setaf 2)" RST="$(tput sgr0)" 
+
+HTML=0
+COLOR1=RED
+COLOR2=GREEN
+COLORRESET=RST
+PREFIX1='-'
+PREFIX2='+'
+PREFIXCOMMON=' '
+PALETTE=0
+MINSIMILARITY=50
+
+# DIFF_MODE
+readonly DIFF_MODE_BLOCK="BLOCK"
+readonly DIFF_MODE_LINE="LINE"
+
+# COLOR_MODE
+readonly COLOR_MODE_ALWAYS="ALWAYS"
+readonly COLOR_MODE_AUTO="AUTO"
+readonly COLOR_MODE_NEVER="NEVER"
+
+# COLORDIFF_MODE
+readonly COLORDIFF_MODE_CHAR="CHAR"
+readonly COLORDIFF_MODE_LINE="LINE"
+readonly COLORDIFF_MODE_AUTO="AUTO"
+
+# inspired from https://stackoverflow.com/questions/806906/how-do-i-test-if-a-variable-is-a-number-in-bash
+isnumber () 
+{
+    [[ $1 == +([0-9]) ]]
+} 
+
+OPTSPEC="hlc-:"
+die() { echo "$*" >&2; usage; exit 2; }  # complain to STDERR and exit with error
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+while getopts "$OPTSPEC" OPT; do
+  # support long options: https://stackoverflow.com/a/28466267/519360
+  if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
+    OPT="${OPTARG%%=*}"       # extract long option name
+    OPTARG="${OPTARG#$OPT}"   # extract long option argument (may be empty)
+    OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
+  fi
+  case "$OPT" in
+        h | help)
+            usage
+            exit 
+            ;;
+        #b | bravo )    needs_arg; bravo="$OPTARG" ;;
+
+        html)
+            HTML=1
+            ;;
+        l | line)
+            COLORDIFF_MODE=$COLORDIFF_MODE_LINE
+            ;;
+        c | char)
+            COLORDIFF_MODE=$COLORDIFF_MODE_CHAR
+            ;;
+        threshold)
+            needs_arg
+            isnumber "$OPTARG" && [ "$OPTARG" -ge 0 -a "$OPTARG" -le 100 ] || die "Threshold should be a number between 0 and 100"
+            MINSIMILARITY="$OPTARG"
+            ;;
+        colordiff)
+            needs_arg
+            case "$OPTARG" in
+            auto)
+                COLORDIFF_MODE=$COLORDIFF_MODE_AUTO
+                ;;
+            line)
+                COLORDIFF_MODE=$COLORDIFF_MODE_LINE
+                ;;
+            char)
+                COLORDIFF_MODE=$COLORDIFF_MODE_CHAR
+                ;;
+            *)
+                die "Unknown --colordiff option: '$OPTARG'" ;;  # bad --colordiff option
+            esac
+            ;;
+        prefixes)
+            needs_arg
+            IFS=: read -a PREFIXES <<<"$OPTARG"
+            [ "${#PREFIXES[@]}" = 3 ] || die "Bad --prefixes option: '$OPTARG'. Should be in the form '<string>:<string>:<string>'"  # bad --prefixes option
+            PREFIX1=${PREFIXES[0]}
+            PREFIX2=${PREFIXES[1]}
+            PREFIXCOMMON=${PREFIXES[2]}
+            ;;
+        palette)
+            needs_arg
+            PALETTE=1
+            IFS=: read -a COLORS <<<"$OPTARG"
+            [ "${#COLORS[@]}" = 3 ] || die "Bad --palette option: '$OPTARG'. Should be in the form '<string>:<string>:<string>'"  # bad --palette option
+            COLOR1=${COLORS[0]}
+            COLOR2=${COLORS[1]}
+            COLORRESET=${COLORS[2]}
+            ;;
+        ??* )          die "Unknown option --$OPT" ;;  # bad long option
+        ? )            exit 2 ;;  # bad short option (error reported via getopts)
+    esac
+done
+shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
+# check incompatible options
+
+
+
+#
+# from https://stackoverflow.com/questions/34376884/highlight-string-differences
+#
+
+# Using stdin input, outputs each char. on its own line, with actual newlines
+# in the input represented as literal '\n'.
+toSingleCharLines() {
+  sed 's/\(.\)/\1\'$'\n''/g; s/\n$/\'$'\n''\\n/'
+}
+
+# Using stdin input, reassembles a string split into 1-character-per-line output
+# by toSingleCharLines().
+fromSingleCharLines() {
+  awk '/\\n$/ { printf "%s\n", substr($0, 1, length($0) - 2); next} { printf "%s", $0 }'
+}
+
+# Prints a colored string read from stdin by interpreting embedded color references
+# such as '${COLOR1}'.
+printColored() {
+  local str=$(</dev/stdin)
+  if [ "$PALETTE" = 1 ]
+  then
+    str=${str//'${COLOR1}'/${COLOR1}}
+    str=${str//'${COLOR2}'/${COLOR2}}
+    str=${str//'${COLORRESET}'/${COLORRESET}}
+  else
+    str=${str//'${COLOR1}'/${!COLOR1}}
+    str=${str//'${COLOR2}'/${!COLOR2}}
+    str=${str//'${COLORRESET}'/${!COLORRESET}}
+  fi
+  printf '%s\n' "$str"
+}
+
+printHTML() {
+  local str=$(</dev/stdin)
+  str=${str//'${COLOR1}'/<font color=${COLOR1,,}>}
+  str=${str//'${COLOR2}'/<font color=${COLOR2,,}>}
+  str=${str//'${COLORRESET}'/</font>}
+
+  printf '%s\n' "$str" | sed -e 's!$!<BR/>!g'
+}
+
+
+computeSimilarity ()
+{
+    if [ ${#1} = 0 -a ${#2} = 0 ]
+    then
+        echo 0
+    else
+        local diff=$(diff -U 1000000000000 <(toSingleCharLines <<<"$1") <(toSingleCharLines <<<"$2"))
+        local common=$(($(echo "$diff" | grep -a -E '^ ' | wc -l) - 1)) # remove trailing \n
+        local max=$([ ${#1} -gt ${#2} ] && echo ${#1} || echo ${#2})
+        local s=$(( $common * 100 / $max ))
+        echo $s
+    fi
+}
+
+blockOrLineDisplay() {
+    local prev_result="$1"
+    local currentresult="$2"
+
+    if [ $(wc -l <<<"$prev_result") -gt 1 -o $(wc -l <<<"$current_result") -gt 1 -o ${#prev_result} -gt 30 -o ${#current_result} -gt 30 ]
+    then
+        # several lines or long line
+        echo "BLOCKDISPLAY"
+    else
+        echo "LINEDISPLAY"
+    fi
+}
+
+coloredOrUncolored() {
+    local prev_result="$1"
+    local currentresult="$2"
+   
+    if [ $(computeSimilarity "$prev_result" "$current_result") -gt $MINSIMILARITY ]
+    then
+        echo "COLORED_DISPLAY"
+    else
+        echo "UNCOLORED_DISPLAY"
+    fi
+}
+
+displayDiffLine()
+{
+    local old="$1"
+    local new="$2"
+    local color="$3"
+    
+    diff --changed-group-format='${'"$color"'}%=${COLORRESET}' <(toSingleCharLines <<<"$old") <(toSingleCharLines <<<"$new") | fromSingleCharLines
+}
+
+displayModifiedBlock ()
+{
+    local -n mblock_=$1
+    local -n pblock_=$2
+    local color=$3
+    local sign="$4"
+
+    
+    for (( m=0; m<${#mblock_[@]}; m++)) do
+        # find max similarity line in pblock_
+        local max=0
+        local pmax=""
+        for (( p=0; p<${#pblock_[@]}; p++)) do
+            local a=""
+            if [ $sign = "$PREFIX1" ]
+            then
+                a="similarity_${m}_${p}"
+            else
+                a="similarity_${p}_${m}"
+            fi
+            local s="${!a}"
+            if [ $s -gt $max ]
+            then 
+                max=$s
+                pmax=$p
+            fi
+        done
+
+        #echo "max: $max $pmax ${pblock_[$pmax]}"
+        if [ "$COLORDIFF_MODE" = "$COLORDIFF_MODE_CHAR" -o \( "$COLORDIFF_MODE" = "$COLORDIFF_MODE_AUTO" -a $max -gt $MINSIMILARITY \) ]
+        then
+            local line=$(displayDiffLine "${mblock_[$m]}" "${pblock_[$pmax]}" "$color")
+            echo "\${$color}$sign\${COLORRESET}$line"  
+        else
+            echo "\${$color}$sign${mblock_[$m]}\${COLORRESET}"  
+        fi
+    done
+}
+
+displayModifiedBlocks ()
+{
+    local -n mblock=$1
+    local -n pblock=$2
+
+    # compute level of similarity between mblock and pblock lines
+    for (( m=0; m<${#mblock[@]}; m++)) do
+        for (( p=0; p<${#pblock[@]}; p++)) do
+            #echo computing "${mblock[$m]}" "${pblock[$p]}"
+            local s=$(computeSimilarity "${mblock[$m]}" "${pblock[$p]}")
+            #echo $s
+            declare "similarity_${m}_${p}=$s"
+        done
+    done
+
+    displayModifiedBlock mblock pblock "COLOR1" "$PREFIX1"
+    displayModifiedBlock pblock mblock "COLOR2" "$PREFIX2"
+}
+
+showdiff ()
+{
+    local prev_result="$1"
+    local current_result="$2"
+
+    IFS=''
+    local plusblock=()
+    local minusblock=()
+    while read line
+    do
+        case "$line" in
+        "@"*|"+++ "*|"--- "*)
+            ;;
+        +*)
+            plusblock+=("${line:1}")
+            ;;
+        -*)
+            minusblock+=("${line:1}")
+            ;;
+        *)
+
+            displayModifiedBlocks minusblock plusblock 
+            echo "${PREFIXCOMMON}${line:1}"
+
+            plusblock=()
+            minusblock=()
+            ;;
+
+        esac
+    done <<<$(diff --color=never -U 1000000000000 -d <(echo "$prev_result") <(echo "$current_result")) # use <<< rather than pipe to remember variables in while loop (see https://unix.stackexchange.com/questions/402750/modify-global-variable-in-while-loop#:~:text=In%20your%20example%20the%20while,to%20run%20in%20a%20subshell.)
+    if [ ${#minusblock[@]} -gt 0 -o ${#plusblock[0]} -gt 0 ]
+    then
+        displayModifiedBlocks minusblock plusblock 
+    fi
+}
+
+
+function display2cols()
+{
+    local col1=()
+    local col2=()
+    local -i col1length=0
+
+    while [ $# -gt 0 ]
+    do
+        IFS='' col1+=("$1")
+        if [ ${#1} -gt $col1length ]
+        then   
+            col1length=${#1}
+        fi
+        col2+=("$2")
+        shift; shift
+    done
+    for ((c=0; c<${#col1[@]}; c++)) 
+    do
+        echo -n "${col1[$c]}"
+        printf " \e[$(($col1length - ${#col1[$c]}));b" # repeat char - from https://stackoverflow.com/a/77183347/6401174
+        echo "${col2[$c]}"
+    done
+}
+
+function check_defaults()
+{
+    case "$DIFF_MODE" in
+    "$DIFF_MODE_BLOCK"|"$DIFF_MODE_LINE")        
+        ;;
+    "")
+        DIFF_MODE=$DIFF_MODE_BLOCK
+        ;;
+    *)
+        echo "Unsupported 'DIFF_MODE' '$DIFF_MODE'. Supported values are:" >&2
+        echo "'\$DIFF_MODE_BLOCK'($DIFF_MODE_BLOCK):        Differences are shown" >&2
+        echo "'\$DIFF_MODE_LINE'($DIFF_MODE_LINE):          " >&2
+        DIFF_MODE=$DIFF_MODE_BLOCK
+        ;;
+    esac
+
+    case "$COLOR_MODE" in
+    "$COLOR_MODE_ALWAYS"|"$COLOR_MODE_AUTO"|"$COLOR_MODE_NEVER")
+        ;;
+    "")
+        COLOR_MODE=$COLOR_MODE_AUTO
+        ;;
+    *)
+        echo "Unsupported 'COLOR_MODE' '$COLOR_MODE'. Supported values are:" >&2
+        display2cols "\$COLOR_MODE_ALWAYS ($COLOR_MODE_ALWAYS)" ": Always highlight differences with colors" \
+                     "\$COLOR_MODE_AUTO ($COLOR_MODE_AUTO)" ": Highlight differences when displaying on a terminal" \
+                     "\$COLOR_MODE_NEVER ($COLOR_MODE_NEVER)" ": Do not highlight differences" >&2
+        COLOR_MODE=$COLOR_MODE_AUTO
+        ;;
+    esac
+
+    case "$COLORDIFF_MODE" in
+    "$COLORDIFF_MODE_CHAR"|"$COLORDIFF_MODE_LINE"|"$COLORDIFF_MODE_AUTO")
+        ;;
+    "")
+        COLORDIFF_MODE=$COLORDIFF_MODE_AUTO
+        ;;
+    *)
+        echo "Unsupported 'COLORDIFF_MODE' '$COLORDIFF_MODE'. Supported values are:" >&2
+        display2cols "\$COLORDIFF_MODE_CHAR'($COLORDIFF_MODE_CHAR)" ": Differences are highlighted at char level" \
+                     "\$COLORDIFF_MODE_AUTO'($COLORDIFF_MODE_AUTO)" ": Differences are highlighted at char level when appropriate" \
+                     "\$COLORDIFF_MODE_LINE'($COLORDIFF_MODE_LINE)" ": Differences are highlighted at line level">&2
+        COLORDIFF_MODE=$COLORDIFF_MODE_AUTO
+
+        ;;
+    esac
+}
+
+check_defaults
+str1=$(<"$1")
+str2=$(<"$2")
+
+[ "$HTML" = 1 ] && showdiff "$str1" "$str2" | printHTML
+[ "$HTML" = 0 ] && showdiff "$str1" "$str2" | printColored
