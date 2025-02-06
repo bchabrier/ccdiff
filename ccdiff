@@ -141,6 +141,12 @@ while getopts "$OPTSPEC" OPT; do
 done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
+[ -r "$1" ] || die "'$1': file not found" 
+[ -r "$2" ] || die "'$2': file not found" 
+STR1=$(<"$1")
+STR2=$(<"$2")
+MAXCHARS=$(( ${#STR1} > ${#STR2} ? ${#STR1} : ${#STR2} ))
+
 # check incompatible options
 
 
@@ -404,10 +410,6 @@ function check_defaults()
 }
 
 check_defaults
-str1=$(<"$1")
-str2=$(<"$2")
 
-MAXCHARS=$(( ${#str1} > ${#str2} ? ${#str1} : ${#str2} ))
-
-[ "$HTML" = 1 ] && showdiff "$str1" "$str2" | printHTML
-[ "$HTML" = 0 ] && showdiff "$str1" "$str2" | printColored
+[ "$HTML" = 1 ] && showdiff "$STR1" "$STR2" | printHTML
+[ "$HTML" = 0 ] && showdiff "$STR1" "$STR2" | printColored
