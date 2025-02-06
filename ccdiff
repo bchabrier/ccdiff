@@ -164,27 +164,23 @@ fromSingleCharLines() {
 # Prints a colored string read from stdin by interpreting embedded color references
 # such as '${COLOR1}'.
 printColored() {
-  local str=$(</dev/stdin)
   if [ "$PALETTE" = 1 ]
   then
-    str=${str//'${COLOR1}'/${COLOR1}}
-    str=${str//'${COLOR2}'/${COLOR2}}
-    str=${str//'${COLORRESET}'/${COLORRESET}}
+    sed -e 's/\${COLOR1}/'"${COLOR1}"'/g' \
+    -e 's/\${COLOR2}/'"${COLOR2}"'/g' \
+    -e 's/\${COLORRESET}/'"${COLORRESET}"'/g' 
   else
-    str=${str//'${COLOR1}'/${!COLOR1}}
-    str=${str//'${COLOR2}'/${!COLOR2}}
-    str=${str//'${COLORRESET}'/${!COLORRESET}}
+    sed -e 's/\${COLOR1}/'"${!COLOR1}"'/g' \
+    -e 's/\${COLOR2}/'"${!COLOR2}"'/g' \
+    -e 's/\${COLORRESET}/'"${!COLORRESET}"'/g' 
   fi
-  printf '%s\n' "$str"
 }
 
 printHTML() {
-  local str=$(</dev/stdin)
-  str=${str//'${COLOR1}'/<font color=${COLOR1,,}>}
-  str=${str//'${COLOR2}'/<font color=${COLOR2,,}>}
-  str=${str//'${COLORRESET}'/</font>}
-
-  printf '%s\n' "$str" | sed -e 's!$!<BR/>!g'
+  sed -e 's/\${COLOR1}/<font color='"${COLOR1,,}"'>/g' \
+  -e 's/\${COLOR2}/<font color='"${COLOR2,,}"'>/g' \
+  -e 's/\${COLORRESET}/<\/font>/g' \
+  -e 's!$!<BR/>!g'
 }
 
 
@@ -194,10 +190,14 @@ computeSimilarity ()
     then
         echo 0
     else
-        local diff=$(diff -U 1000000000000 <(toSingleCharLines <<<"$1") <(toSingleCharLines <<<"$2"))
-        local common=$(($(echo "$diff" | grep -a -E '^ ' | wc -l) - 1)) # remove trailing \n
-        local max=$([ ${#1} -gt ${#2} ] && echo ${#1} || echo ${#2})
-        local s=$(( $common * 100 / $max ))
+        local diff=$(diff -U $MAXCHARS <(toSingleCharLines <<<"$1") <(toSingleCharLines <<<"$2"))
+        local commonlines="${diff/#--- *@@$'\n'/}" # remove header
+        commonlines="${commonlines//+?$'\n'/}" # remove added chars
+        commonlines="${commonlines//-?$'\n'/}" # remove removed chars
+        commonlines="${commonlines// ?$'\n'/X}" # keep common chars
+        commonlines="${commonlines/% \\n/}" # remove trailing \n
+        local common=${#commonlines} # count common chars
+        local s=$(( $common * 100 / ( ${#1} > ${#2} ? ${#1} : ${#2} )))
         echo $s
     fi
 }
@@ -243,12 +243,12 @@ displayModifiedBlock ()
     local color=$3
     local sign="$4"
 
-    
+
     for (( m=0; m<${#mblock_[@]}; m++)) do
         # find max similarity line in pblock_
         local max=0
         local pmax=""
-        for (( p=0; p<${#pblock_[@]}; p++)) do
+        [ "$COLORDIFF_MODE" = "$COLORDIFF_MODE_LINE" ] || for (( p=0; p<${#pblock_[@]}; p++)) do
             local a=""
             if [ $sign = "$PREFIX1" ]
             then
@@ -281,7 +281,7 @@ displayModifiedBlocks ()
     local -n pblock=$2
 
     # compute level of similarity between mblock and pblock lines
-    for (( m=0; m<${#mblock[@]}; m++)) do
+    [ "$COLORDIFF_MODE" = "$COLORDIFF_MODE_LINE" ] || for (( m=0; m<${#mblock[@]}; m++)) do
         for (( p=0; p<${#pblock[@]}; p++)) do
             #echo computing "${mblock[$m]}" "${pblock[$p]}"
             local s=$(computeSimilarity "${mblock[$m]}" "${pblock[$p]}")
@@ -323,7 +323,7 @@ showdiff ()
             ;;
 
         esac
-    done <<<$(diff --color=never -U 1000000000000 -d <(echo "$prev_result") <(echo "$current_result")) # use <<< rather than pipe to remember variables in while loop (see https://unix.stackexchange.com/questions/402750/modify-global-variable-in-while-loop#:~:text=In%20your%20example%20the%20while,to%20run%20in%20a%20subshell.)
+    done <<<$(diff --color=never -U $MAXCHARS -d <(echo "$prev_result") <(echo "$current_result")) # use <<< rather than pipe to remember variables in while loop (see https://unix.stackexchange.com/questions/402750/modify-global-variable-in-while-loop#:~:text=In%20your%20example%20the%20while,to%20run%20in%20a%20subshell.)
     if [ ${#minusblock[@]} -gt 0 -o ${#plusblock[0]} -gt 0 ]
     then
         displayModifiedBlocks minusblock plusblock 
@@ -406,6 +406,8 @@ function check_defaults()
 check_defaults
 str1=$(<"$1")
 str2=$(<"$2")
+
+MAXCHARS=$(( ${#str1} > ${#str2} ? ${#str1} : ${#str2} ))
 
 [ "$HTML" = 1 ] && showdiff "$str1" "$str2" | printHTML
 [ "$HTML" = 0 ] && showdiff "$str1" "$str2" | printColored

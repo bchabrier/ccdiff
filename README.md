@@ -1,6 +1,8 @@
 # CCDIFF - Colored Char DIFF: Highlight file differences char by char
 
-Similar to linux `diff` utility, but able to highlight differences char by char instead of line by line.
+Similar to linux `diff` utility, but able to highlight differences char by char instead of line by line:
+
+<img alt="screenshot" src="https://github.com/user-attachments/assets/176b7892-b744-46f9-adc7-0505d19a502a" />
 
 ## Usage
 [//]: # (Usage START)
@@ -40,6 +42,6 @@ Options:
 ```
 [//]: # (Usage END)
 
-## Sample screenshot
-<img alt="screenshot" src="https://github.com/user-attachments/assets/176b7892-b744-46f9-adc7-0505d19a502a" />
+## Caveats
 
+`ccdiff` is actually a `bash` script, using `diff`. Its performance is sometimes a bit poor.
